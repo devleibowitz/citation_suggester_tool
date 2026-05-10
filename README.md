@@ -1,18 +1,21 @@
 # citation_suggester
 
-`citation_suggester` helps you build a bibliography from your manuscript text.  
-You drop in a plain-text manuscript, configure a few options, and the tool suggests relevant papers you can review and cite.  
-The output is written to the `outputs/` folder in machine-readable (`.json`) and human-readable (`.csv`) formats, including ranked citation suggestions and formatted bibliography entries based on your selected style. Each row in the output csv has a title paper, link, citation count, section in your manuscript to which it was ranked highly for, and the paragraph number within that section where you should consider inserting it in.
+`citation_suggester` helps you turn a manuscript draft into citation suggestions. It reads your manuscript section-by-section, generates search queries with Gemini, fetches papers from Semantic Scholar, and ranks results with a hybrid score (semantic similarity + citation count + recency).
+
+The tool writes outputs to `outputs/` as:
+- `.csv` for a unified bibliography suggestion list
+- `.json` for detailed per-paragraph suggestions
+- `.json` for saved generated queries and run metadata
 
 ---
 
-## 1) Set up the repository
+## 1) Set up the repo
 
 ### Prerequisites
 - Python `3.12+`
 - [Poetry](https://python-poetry.org/docs/#installation)
 
-### Clone and install
+### Install
 
 ```bash
 git clone <your-repo-url>
@@ -20,7 +23,7 @@ cd citation_suggester_tool
 poetry install
 ```
 
-This installs the project and the CLI command:
+Verify the CLI:
 
 ```bash
 poetry run cite-suggest --help
@@ -30,166 +33,192 @@ poetry run cite-suggest --help
 
 ## 2) Add your manuscript (plain text)
 
-Put your manuscript as a `.txt` file in the `papers/` folder:
+Put your manuscript in the `papers/` folder, for example:
 
 ```text
-papers/
-  my_manuscript.txt
+papers/my_manuscript.txt
 ```
 
-Tips:
-- Use plain UTF-8 text (`.txt`).
-- Start each manuscript section with a hashtag heading (for example `# Introduction`, `# Methods`, `# Discussion`).
-- Keep section headings in your manuscript; that usually improves retrieval quality.
-- If you have multiple manuscripts, place all of them in `papers/`.
+Important format rule:
+- Start each section with a heading line that begins with `# ` (hash + space)
+- Example section headers:
+  - `# Introduction`
+  - `# Methods`
+  - `# Results`
+  - `# Discussion`
+
+This is required because section parsing is based on lines that start with `# `.
 
 ---
 
 ## 3) Configure environment variables and API keys
 
-The project includes `.env.example`. Copy it to `.env`:
+Copy `.env.example` to `.env`:
 
 ```bash
 cp .env.example .env
 ```
 
-Then edit `.env`:
+Then set your keys:
 
 ```dotenv
 GOOGLE_API_KEY=your_google_ai_studio_key
 SEMANTIC_SCHOLAR_API_KEY=your_semantic_scholar_key_optional
 ```
 
-### Where to get keys
-- `GOOGLE_API_KEY` (required): create one in [Google AI Studio](https://aistudio.google.com/app/apikey)
-- `SEMANTIC_SCHOLAR_API_KEY` (optional): request from [Semantic Scholar API](https://www.semanticscholar.org/product/api#api-key-form)
+Where to get keys:
+- `GOOGLE_API_KEY` (required): [Google AI Studio API key](https://aistudio.google.com/app/apikey)
+- `SEMANTIC_SCHOLAR_API_KEY` (optional): [Semantic Scholar API key form](https://www.semanticscholar.org/product/api#api-key-form)
 
 Notes:
-- If your config enables Semantic Scholar authenticated usage (`semantic_scholar.use_api_key: true`), set `SEMANTIC_SCHOLAR_API_KEY`.
-- Never commit your `.env` file.
+- `GOOGLE_API_KEY` is required for Gemini query generation.
+- `SEMANTIC_SCHOLAR_API_KEY` is only required if `semantic_scholar.use_api_key: true`.
+- Do not commit `.env`.
 
 ---
 
-## 4) Set up the config file
+## 4) Configure `config/citation_suggester.yaml`
 
-Create a file named `citation_suggester.yaml` in the repo root.
+By default, the CLI reads:
+
+```text
+config/citation_suggester.yaml
+```
 
 Example:
 
 ```yaml
-input:
-  papers_dir: "papers"
-  file_glob: "*.txt"
+input_path: papers/my_manuscript.txt
 
-output:
-  output_dir: "outputs"
-  write_json: true
-  write_markdown: true
+exclude_sections:
+  - references
+  - appendix
 
-retrieval:
-  top_k: 25
-  min_relevance_score: 0.3
+paragraph_mode: auto
+min_paragraph_chars: 40
 
-embedding:
-  model_name: "sentence-transformers/all-MiniLM-L6-v2"
-
-llm:
-  provider: "google"
-  model: "gemini-1.5-flash"
-  temperature: 0.2
+queries_per_paragraph_min: 3
+queries_per_paragraph_max: 5
+top_k: 5
 
 semantic_scholar:
-  enabled: true
+  papers_per_query: 10
+  max_queries: 5
+  request_timeout_seconds: 30
+  max_results_per_paragraph: 60
   use_api_key: false
-  max_results_per_query: 20
 
-bibliography:
-  style: "apa"
-  max_suggestions: 30
-  include_abstract_snippets: true
+gemini:
+  model: gemini-2.0-flash
+  temperature: 0.2
+
+embeddings:
+  model: all-MiniLM-L6-v2
+
+ranking:
+  weight_similarity: 0.35
+  weight_citations: 0.50
+  weight_recency: 0.15
 ```
 
 ### Parameter walkthrough
 
-- `input.papers_dir`  
-  Folder containing your manuscript `.txt` files.
+- `input_path`  
+  Path to one manuscript `.txt` file.
 
-- `input.file_glob`  
-  Pattern used to pick files from `papers/` (for example `*.txt`).
+- `exclude_sections`  
+  Skip specific section titles (case-insensitive), such as `references`.
 
-- `output.output_dir`  
-  Folder where generated bibliography suggestions are written.
+- `paragraph_mode`  
+  Paragraph splitting strategy: `auto`, `blankline`, or `line`.
 
-- `retrieval.top_k`  
-  Number of candidate papers fetched before final ranking.
+- `min_paragraph_chars`  
+  Ignore very short paragraphs.
 
-- `retrieval.min_relevance_score`  
-  Filters low-confidence matches; increase for stricter suggestions.
+- `queries_per_paragraph_min` and `queries_per_paragraph_max`  
+  Min/max number of queries Gemini should generate per paragraph.
 
-- `embedding.model_name`  
-  Embedding model used for semantic matching.
+- `top_k`  
+  Final number of ranked suggestions kept per paragraph.
 
-- `llm.provider`, `llm.model`, `llm.temperature`  
-  Controls the language model used for ranking/formatting suggestions.
+- `semantic_scholar.papers_per_query`  
+  Number of papers requested per query.
 
-- `semantic_scholar.enabled`  
-  Turns Semantic Scholar querying on/off.
+- `semantic_scholar.max_queries`  
+  Hard cap on total queries used per paragraph.
+
+- `semantic_scholar.request_timeout_seconds`  
+  API request timeout.
+
+- `semantic_scholar.max_results_per_paragraph`  
+  Maximum deduplicated candidate papers kept before final ranking.
 
 - `semantic_scholar.use_api_key`  
-  Set `true` to use `SEMANTIC_SCHOLAR_API_KEY` from `.env`.
+  If `true`, adds `SEMANTIC_SCHOLAR_API_KEY` to Semantic Scholar requests.
 
-- `semantic_scholar.max_results_per_query`  
-  How many API results to collect per query.
+- `gemini.model`, `gemini.temperature`  
+  Gemini model and generation temperature for query creation.
 
-- `bibliography.style`  
-  Output citation style (for example `apa`, `mla`, `chicago`).
+- `embeddings.model`  
+  Sentence-transformers embedding model for semantic similarity.
 
-- `bibliography.max_suggestions`  
-  Maximum bibliography entries to return.
+- `ranking.weight_similarity`, `ranking.weight_citations`, `ranking.weight_recency`  
+  Relative weights for the final ranking score.
 
 ---
 
 ## 5) Run the tool
 
-Typical run:
+Run using default config path:
 
 ```bash
 poetry run cite-suggest
 ```
 
-If your CLI supports explicit config flags in your local version, use:
+Run with a custom config path:
 
 ```bash
-poetry run cite-suggest --config citation_suggester.yaml
+poetry run cite-suggest --config path/to/citation_suggester.yaml
 ```
 
-Then check the `outputs/` folder for generated files.
+Optional flags:
+- `--sections "Introduction" "Discussion"` to process only selected sections
+- `--resume-queries-dir` to reuse the newest saved query run
+- `--resume-queries-dir <dir>` to reuse a specific `outputs/queries/<run_id>` directory
 
 ---
 
-## 6) Recommended first run checklist
+## 6) Output files explained
 
-- `.env` exists and contains a valid `GOOGLE_API_KEY`
-- `papers/` has at least one `.txt` manuscript file
-- `citation_suggester.yaml` exists and points to correct folders
-- `poetry run cite-suggest` completes without auth/config errors
+Each run writes files under `outputs/`:
+
+- `outputs/runs/suggestions_unified_<run_id>.csv`  
+  One row per suggested paper with:
+  - `paper_id`, `title`, `link`, `citation_count`, `year`
+  - `sections` where it appears
+  - `paragraph_refs` (for example `Introduction#2`)
+
+- `outputs/runs/suggestions_by_paragraph_<run_id>.json`  
+  Ranked suggestions per paragraph, including similarity/citation/recency/final scores.
+
+- `outputs/runs/run_meta_<run_id>.json`  
+  Run metadata including input path and generated file paths.
+
+- `outputs/queries/<run_id>/<section_slug>/paragraph_XXX.json`  
+  Saved queries per paragraph (used by resume mode).
 
 ---
 
 ## Troubleshooting
 
-- **No suggestions returned**  
-  Lower `retrieval.min_relevance_score` and/or increase `retrieval.top_k`.
+- **`GOOGLE_API_KEY` missing**  
+  Add it in `.env` and rerun.
 
-- **Authentication errors**  
-  Recheck `.env` keys and ensure there are no extra quotes/spaces.
+- **No sections detected**  
+  Make sure your section headers start with `# ` exactly.
 
-- **Nothing happens / no files produced**  
-  Confirm manuscript files are in `papers/` and match `input.file_glob`.
+- **Sparse or weak suggestions**  
+  Increase `semantic_scholar.papers_per_query`, `semantic_scholar.max_queries`, or adjust ranking weights.
 
-- **Semantic Scholar limits**  
-  Add `SEMANTIC_SCHOLAR_API_KEY` and set `semantic_scholar.use_api_key: true`.
-
----
-
-If you want, the next improvement can be adding a sample manuscript and a sample output file so first-time users can verify expected behavior in under 2 minutes.
+- **Semantic Scholar 403/429**  
+  Retry later, reduce request volume, or enable API-key mode with a valid `SEMANTIC_SCHOLAR_API_KEY`.
