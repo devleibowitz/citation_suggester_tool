@@ -1,0 +1,36 @@
+# Paths are relative to project_root (parent of the config/ directory by default).
+input_path: papers/thesis_ctg.txt
+
+# project_root: null  # optional override; default = repo root (parent of config/)
+
+exclude_sections: []
+# example: ["Abstract", "Comment"]
+
+paragraph_mode: auto
+min_paragraph_chars: 40
+
+queries_per_paragraph_min: 3
+queries_per_paragraph_max: 5
+top_k: 5
+
+semantic_scholar:
+  # Public Graph API (no x-api-key). Set true + SEMANTIC_SCHOLAR_API_KEY for higher limits.
+  use_api_key: true
+  papers_per_query: 10
+  max_queries: 5
+  request_timeout_seconds: 30
+  max_results_per_paragraph: 60
+
+gemini:
+  model: gemini-2.5-flash
+  temperature: 0.2
+
+# Local sentence-transformers model (~90MB on first download).
+embeddings:
+  model: all-MiniLM-L6-v2
+
+# Hybrid ranking: weights are normalized to sum 1.0 at runtime.
+ranking:
+  weight_similarity: 0.35
+  weight_citations: 0.50
+  weight_recency: 0.15

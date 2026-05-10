@@ -1,0 +1,17 @@
+outputs/
+papers/
+chroma_db/
+rag_notebook_*.ipynb
+__pycache__/
+*.pyc
+.env
+.venv/
+dist/
+*.egg-info/
+.cursor/
+.DS_Store
+scripts/
+outputs/.keep
+papers/.keep
+
+
