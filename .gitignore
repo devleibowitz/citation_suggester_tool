@@ -1,5 +1,7 @@
-outputs/
-papers/
+outputs/*
+outputs/.gitkeep
+papers/*
+papers/.gitkeep
 chroma_db/
 rag_notebook_*.ipynb
 __pycache__/
@@ -11,7 +13,5 @@ dist/
 .cursor/
 .DS_Store
 scripts/
-outputs/.keep
-papers/.keep
 
 
